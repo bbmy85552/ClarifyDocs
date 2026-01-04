@@ -1,0 +1,869 @@
+---
+title: Fumadocs - 进阶实现方案
+description: good
+---
+
+## 🎯 项目目标
+
+将现有的静态 Fumadocs 项目升级为动态文章管理系统，支持：
+- 前端文章编辑和发布
+- 后端 API 数据管理
+- MySQL 数据库存储
+- 动态目录和文章展示
+- 目录间的独立性
+
+## 🏗️ 系统架构
+
+### 整体架构图
+
+```
+┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
+│   前端 (Next.js) │    │  后端 (FastAPI)  │    │  数据库 (MySQL)  │
+│                 │    │                 │    │                 │
+│ ┌─────────────┐ │    │ ┌─────────────┐ │    │ ┌─────────────┐ │
+│ │ 文章展示页面 │ │◄───┤ │ 文章查询API │ │◄───┤ │ articles表  │ │
+│ └─────────────┘ │    │ └─────────────┘ │    │ └─────────────┘ │
+│                 │    │                 │    │                 │
+│ ┌─────────────┐ │    │ ┌─────────────┐ │    │ ┌─────────────┐ │
+│ │ 文章管理页面 │ │◄──►│ │ 文章管理API │ │◄──►│ │ categories表│ │
+│ └─────────────┘ │    │ └─────────────┘ │    │ └─────────────┘ │
+│                 │    │                 │    │                 │
+│ ┌─────────────┐ │    │ ┌─────────────┐ │    │                 │
+│ │ 目录管理页面 │ │◄──►│ │ 目录管理API │ │    │                 │
+│ └─────────────┘ │    │ └─────────────┘ │    │                 │
+└─────────────────┘    └─────────────────┘    └─────────────────┘
+```
+
+### 技术栈详情
+
+**前端 (Frontend)**
+- Next.js 15 + React 19 + TypeScript
+- Fumadocs UI 组件
+- Tailwind CSS
+- 富文本编辑器 (推荐: @uiw/react-md-editor)
+
+**后端 (Backend)**
+- Python 3.11+
+- FastAPI 0.104+
+- SQLAlchemy 2.0 (ORM)
+- Pydantic (数据验证)
+- python-multipart (文件上传)
+
+**数据库 (Database)**
+- MySQL 8.0+
+- 连接池管理
+- 事务支持
+
+## 📊 数据库设计
+
+### 表结构设计
+
+#### 1. 文章分类表 (categories)
+
+```sql
+CREATE TABLE categories (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    name VARCHAR(100) NOT NULL UNIQUE COMMENT '分类名称',
+    slug VARCHAR(100) NOT NULL UNIQUE COMMENT 'URL友好的分类标识',
+    description TEXT COMMENT '分类描述',
+    sort_order INT DEFAULT 0 COMMENT '排序权重',
+    is_active BOOLEAN DEFAULT TRUE COMMENT '是否启用',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_slug (slug),
+    INDEX idx_sort_order (sort_order),
+    INDEX idx_is_active (is_active)
+);
+```
+
+#### 2. 文章表 (articles)
+
+```sql
+CREATE TABLE articles (
+    id INT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(200) NOT NULL COMMENT '文章标题',
+    slug VARCHAR(200) NOT NULL COMMENT 'URL友好的文章标识',
+    description TEXT COMMENT '文章简介',
+    content LONGTEXT NOT NULL COMMENT '文章正文内容(Markdown)',
+    category_id INT NOT NULL COMMENT '所属分类ID',
+    author VARCHAR(100) NOT NULL COMMENT '作者',
+    status ENUM('draft', 'published', 'archived') DEFAULT 'draft' COMMENT '文章状态',
+    sort_order INT DEFAULT 0 COMMENT '在分类中的排序',
+    view_count INT DEFAULT 0 COMMENT '浏览次数',
+    word_count INT DEFAULT 0 COMMENT '字数统计',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    published_at TIMESTAMP NULL COMMENT '发布时间',
+    
+    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE CASCADE,
+    UNIQUE KEY unique_slug_category (slug, category_id),
+    INDEX idx_category_id (category_id),
+    INDEX idx_status (status),
+    INDEX idx_published_at (published_at),
+    INDEX idx_sort_order (sort_order),
+    
+    FULLTEXT KEY ft_title_content (title, content)
+);
+```
+
+### 示例数据
+
+```sql
+-- 插入示例分类
+INSERT INTO categories (name, slug, description, sort_order) VALUES 
+('Telegram 开发', 'telegram-dev', 'Telegram 机器人和应用开发相关教程', 1),
+('API 文档', 'api-docs', 'API 接口使用说明和示例', 2),
+('最佳实践', 'best-practices', '开发最佳实践和经验分享', 3);
+
+-- 插入示例文章
+INSERT INTO articles (title, slug, description, content, category_id, author, status, published_at) VALUES 
+('Telegram Bot 创建指南', 'telegram-bot-guide', '详细介绍如何创建和配置 Telegram 机器人', '# Telegram Bot 创建指南\n\n本文将详细介绍...', 1, 'Admin', 'published', NOW());
+```
+
+## 🔧 后端 API 设计
+
+### 项目结构
+
+```
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                 # FastAPI 应用入口
+│   ├── config.py              # 配置文件
+│   ├── database.py            # 数据库连接
+│   ├── models/                # SQLAlchemy 模型
+│   │   ├── __init__.py
+│   │   ├── article.py
+│   │   └── category.py
+│   ├── schemas/               # Pydantic 模式
+│   │   ├── __init__.py
+│   │   ├── article.py
+│   │   └── category.py
+│   ├── api/                   # API 路由
+│   │   ├── __init__.py
+│   │   ├── articles.py
+│   │   └── categories.py
+│   └── utils/                 # 工具函数
+│       ├── __init__.py
+│       └── text_utils.py
+├── requirements.txt
+└── .env
+```
+
+### 核心代码实现
+
+#### 1. 数据库配置 (database.py)
+
+```python
+from sqlalchemy import create_engine
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+import os
+
+DATABASE_URL = f"mysql+pymysql://{os.getenv('DB_USER')}:{os.getenv('DB_PASSWORD')}@{os.getenv('DB_HOST')}/{os.getenv('DB_NAME')}"
+
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+Base = declarative_base()
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+```
+
+#### 2. 数据模型 (models/article.py)
+
+```python
+from sqlalchemy import Column, Integer, String, Text, ForeignKey, DateTime, Enum, Boolean
+from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
+from database import Base
+
+class Category(Base):
+    __tablename__ = "categories"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False)
+    slug = Column(String(100), unique=True, nullable=False, index=True)
+    description = Column(Text)
+    sort_order = Column(Integer, default=0, index=True)
+    is_active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    
+    articles = relationship("Article", back_populates="category")
+
+class Article(Base):
+    __tablename__ = "articles"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(200), nullable=False)
+    slug = Column(String(200), nullable=False, index=True)
+    description = Column(Text)
+    content = Column(Text, nullable=False)
+    category_id = Column(Integer, ForeignKey("categories.id"), nullable=False, index=True)
+    author = Column(String(100), nullable=False)
+    status = Column(Enum('draft', 'published', 'archived'), default='draft', index=True)
+    sort_order = Column(Integer, default=0, index=True)
+    view_count = Column(Integer, default=0)
+    word_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    published_at = Column(DateTime(timezone=True))
+    
+    category = relationship("Category", back_populates="articles")
+```
+
+#### 3. API 路由 (api/articles.py)
+
+```python
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from database import get_db
+from models.article import Article, Category
+from schemas.article import ArticleCreate, ArticleUpdate, ArticleResponse
+
+router = APIRouter(prefix="/api/articles", tags=["articles"])
+
+@router.get("/", response_model=List[ArticleResponse])
+def get_articles(
+    category_slug: Optional[str] = None,
+    status: str = "published",
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    db: Session = Depends(get_db)
+):
+    """获取文章列表"""
+    query = db.query(Article).join(Category)
+    
+    if category_slug:
+        query = query.filter(Category.slug == category_slug)
+    
+    query = query.filter(Article.status == status)
+    query = query.order_by(Article.sort_order, Article.published_at.desc())
+    
+    articles = query.offset(skip).limit(limit).all()
+    return articles
+
+@router.get("/{category_slug}/{article_slug}", response_model=ArticleResponse)
+def get_article(category_slug: str, article_slug: str, db: Session = Depends(get_db)):
+    """获取单篇文章"""
+    article = db.query(Article).join(Category).filter(
+        Category.slug == category_slug,
+        Article.slug == article_slug,
+        Article.status == "published"
+    ).first()
+    
+    if not article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    # 增加浏览次数
+    article.view_count += 1
+    db.commit()
+    
+    return article
+
+@router.post("/", response_model=ArticleResponse)
+def create_article(article: ArticleCreate, db: Session = Depends(get_db)):
+    """创建文章"""
+    # 检查分类是否存在
+    category = db.query(Category).filter(Category.id == article.category_id).first()
+    if not category:
+        raise HTTPException(status_code=400, detail="Category not found")
+    
+    # 计算字数
+    word_count = calculate_word_count(article.content)
+    
+    db_article = Article(
+        **article.dict(),
+        word_count=word_count
+    )
+    
+    db.add(db_article)
+    db.commit()
+    db.refresh(db_article)
+    return db_article
+
+@router.put("/{article_id}", response_model=ArticleResponse)
+def update_article(article_id: int, article: ArticleUpdate, db: Session = Depends(get_db)):
+    """更新文章"""
+    db_article = db.query(Article).filter(Article.id == article_id).first()
+    if not db_article:
+        raise HTTPException(status_code=404, detail="Article not found")
+    
+    update_data = article.dict(exclude_unset=True)
+    if 'content' in update_data:
+        update_data['word_count'] = calculate_word_count(update_data['content'])
+    
+    for key, value in update_data.items():
+        setattr(db_article, key, value)
+    
+    db.commit()
+    db.refresh(db_article)
+    return db_article
+```
+
+#### 4. 数据验证模式 (schemas/article.py)
+
+```python
+from pydantic import BaseModel, validator
+from datetime import datetime
+from typing import Optional
+from enum import Enum
+
+class ArticleStatus(str, Enum):
+    draft = "draft"
+    published = "published"
+    archived = "archived"
+
+class ArticleBase(BaseModel):
+    title: str
+    slug: str
+    description: Optional[str] = None
+    content: str
+    category_id: int
+    author: str
+    status: ArticleStatus = ArticleStatus.draft
+    sort_order: int = 0
+
+class ArticleCreate(ArticleBase):
+    @validator('slug')
+    def validate_slug(cls, v):
+        if not v.replace('-', '').replace('_', '').isalnum():
+            raise ValueError('Slug must contain only alphanumeric characters, hyphens, and underscores')
+        return v
+
+class ArticleUpdate(BaseModel):
+    title: Optional[str] = None
+    slug: Optional[str] = None
+    description: Optional[str] = None
+    content: Optional[str] = None
+    category_id: Optional[int] = None
+    author: Optional[str] = None
+    status: Optional[ArticleStatus] = None
+    sort_order: Optional[int] = None
+
+class ArticleResponse(ArticleBase):
+    id: int
+    view_count: int
+    word_count: int
+    created_at: datetime
+    updated_at: datetime
+    published_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+```
+
+## 🎨 前端实现
+
+### 1. 文章管理页面结构
+
+```
+app/
+├── admin/                     # 管理后台
+│   ├── articles/
+│   │   ├── page.tsx          # 文章列表
+│   │   ├── create/
+│   │   │   └── page.tsx      # 创建文章
+│   │   └── [id]/
+│   │       └── edit/
+│   │           └── page.tsx   # 编辑文章
+│   ├── categories/
+│   │   └── page.tsx          # 分类管理
+│   └── layout.tsx            # 管理后台布局
+├── docs/
+│   └── [category]/           # 动态分类路由
+│       ├── page.tsx          # 分类文章列表
+│       └── [slug]/
+│           └── page.tsx      # 文章详情页
+└── api/                      # API 代理路由
+    ├── articles/
+    └── categories/
+```
+
+### 2. 文章编辑器组件
+
+```typescript
+// components/article-editor.tsx
+'use client';
+
+import { useState, useRef } from 'react';
+import MDEditor from '@uiw/react-md-editor';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+
+interface ArticleEditorProps {
+  initialData?: Partial<Article>;
+  categories: Category[];
+  onSave: (data: ArticleFormData) => Promise<void>;
+}
+
+export function ArticleEditor({ initialData, categories, onSave }: ArticleEditorProps) {
+  const [formData, setFormData] = useState({
+    title: initialData?.title || '',
+    slug: initialData?.slug || '',
+    description: initialData?.description || '',
+    content: initialData?.content || '',
+    category_id: initialData?.category_id || '',
+    author: initialData?.author || '',
+    status: initialData?.status || 'draft'
+  });
+
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    
+    try {
+      await onSave(formData);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const generateSlug = (title: string) => {
+    return title
+      .toLowerCase()
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .trim();
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="grid grid-cols-2 gap-4">
+        <div>
+          <label className="block text-sm font-medium mb-2">文章标题</label>
+          <Input
+            value={formData.title}
+            onChange={(e) => {
+              const title = e.target.value;
+              setFormData(prev => ({
+                ...prev,
+                title,
+                slug: prev.slug || generateSlug(title)
+              }));
+            }}
+            placeholder="请输入文章标题"
+            required
+          />
+        </div>
+        
+        <div>
+          <label className="block text-sm font-medium mb-2">URL Slug</label>
+          <Input
+            value={formData.slug}
+            onChange={(e) => setFormData(prev => ({ ...prev, slug: e.target.value }))}
+            placeholder="url-friendly-slug"
+            required
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium mb-2">文章简介</label>
+        <Textarea
+          value={formData.description}
+          onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+          placeholder="请输入文章简介"
+          rows={3}
+        />
+      </div>
+
+      <div className="grid grid-cols-3 gap-4">
+        <div>
+          <label className="block text-sm font-medium mb-2">分类</label>
+          <Select
+            value={formData.category_id}
+            onValueChange={(value) => setFormData(prev => ({ ...prev, category_id: value }))}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="选择分类" />
+            </SelectTrigger>
+            <SelectContent>
+              {categories.map((category) => (
+                <SelectItem key={category.id} value={category.id.toString()}>
+                  {category.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-2">作者</label>
+          <Input
+            value={formData.author}
+            onChange={(e) => setFormData(prev => ({ ...prev, author: e.target.value }))}
+            placeholder="作者名称"
+            required
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-2">状态</label>
+          <Select
+            value={formData.status}
+            onValueChange={(value) => setFormData(prev => ({ ...prev, status: value }))}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="draft">草稿</SelectItem>
+              <SelectItem value="published">已发布</SelectItem>
+              <SelectItem value="archived">已归档</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium mb-2">文章内容</label>
+        <MDEditor
+          value={formData.content}
+          onChange={(val) => setFormData(prev => ({ ...prev, content: val || '' }))}
+          height={500}
+          preview="edit"
+        />
+      </div>
+
+      <div className="flex justify-end space-x-4">
+        <Button type="button" variant="outline" onClick={() => window.history.back()}>
+          取消
+        </Button>
+        <Button type="submit" disabled={isLoading}>
+          {isLoading ? '保存中...' : '保存文章'}
+        </Button>
+      </div>
+    </form>
+  );
+}
+```
+
+### 3. 动态路由实现
+
+```typescript
+// app/docs/[category]/page.tsx
+import { notFound } from 'next/navigation';
+import { ArticleCard } from '@/components/article-card';
+
+interface CategoryPageProps {
+  params: { category: string };
+}
+
+export default async function CategoryPage({ params }: CategoryPageProps) {
+  const { category } = params;
+  
+  // 获取分类信息和文章列表
+  const [categoryData, articles] = await Promise.all([
+    fetch(`${process.env.API_BASE_URL}/api/categories/${category}`).then(res => res.json()),
+    fetch(`${process.env.API_BASE_URL}/api/articles?category_slug=${category}`).then(res => res.json())
+  ]);
+
+  if (!categoryData) {
+    notFound();
+  }
+
+  return (
+    <div className="container mx-auto px-4 py-8">
+      <div className="mb-8">
+        <h1 className="text-3xl font-bold mb-4">{categoryData.name}</h1>
+        {categoryData.description && (
+          <p className="text-gray-600 dark:text-gray-400">{categoryData.description}</p>
+        )}
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        {articles.map((article) => (
+          <ArticleCard
+            key={article.id}
+            title={article.title}
+            description={article.description}
+            author={article.author}
+            publishedAt={article.published_at}
+            wordCount={article.word_count}
+            href={`/docs/${category}/${article.slug}`}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// app/docs/[category]/[slug]/page.tsx
+import { notFound } from 'next/navigation';
+import { CustomDocsPage } from '@/components/custom-docs-page';
+import { MDXRemote } from 'next-mdx-remote/rsc';
+
+interface ArticlePageProps {
+  params: { category: string; slug: string };
+}
+
+export default async function ArticlePage({ params }: ArticlePageProps) {
+  const { category, slug } = params;
+  
+  const article = await fetch(
+    `${process.env.API_BASE_URL}/api/articles/${category}/${slug}`
+  ).then(res => res.ok ? res.json() : null);
+
+  if (!article) {
+    notFound();
+  }
+
+  return (
+    <CustomDocsPage
+      title={article.title}
+      description={article.description}
+      content={article.content}
+    >
+      <MDXRemote source={article.content} />
+    </CustomDocsPage>
+  );
+}
+```
+
+## 🔄 数据源集成
+
+### 修改现有的 source.ts
+
+```typescript
+// lib/source.ts
+import { loader } from 'fumadocs-core/source';
+import { docs } from '@/.source';
+
+// 动态数据源适配器
+class DynamicSource {
+  private apiBaseUrl = process.env.API_BASE_URL || 'http://localhost:8000';
+
+  async getCategories() {
+    const response = await fetch(`${this.apiBaseUrl}/api/categories`);
+    return response.json();
+  }
+
+  async getArticlesByCategory(categorySlug: string) {
+    const response = await fetch(`${this.apiBaseUrl}/api/articles?category_slug=${categorySlug}`);
+    return response.json();
+  }
+
+  async getArticle(categorySlug: string, articleSlug: string) {
+    const response = await fetch(`${this.apiBaseUrl}/api/articles/${categorySlug}/${articleSlug}`);
+    return response.json();
+  }
+
+  // 生成动态页面树
+  async generatePageTree() {
+    const categories = await this.getCategories();
+    const tree = [];
+
+    for (const category of categories) {
+      const articles = await this.getArticlesByCategory(category.slug);
+      
+      tree.push({
+        type: 'folder',
+        name: category.name,
+        index: {
+          title: category.name,
+          description: category.description
+        },
+        children: articles.map(article => ({
+          type: 'page',
+          name: article.title,
+          url: `/docs/${category.slug}/${article.slug}`,
+          data: {
+            title: article.title,
+            description: article.description,
+            body: article.content
+          }
+        }))
+      });
+    }
+
+    return tree;
+  }
+}
+
+// 混合数据源：静态 + 动态
+export const source = loader({
+  baseUrl: '/docs',
+  source: docs.toFumadocsSource(),
+});
+
+export const dynamicSource = new DynamicSource();
+
+// 运行时数据获取
+export async function getPageData(categorySlug?: string, articleSlug?: string) {
+  if (categorySlug && articleSlug) {
+    return dynamicSource.getArticle(categorySlug, articleSlug);
+  } else if (categorySlug) {
+    return dynamicSource.getArticlesByCategory(categorySlug);
+  } else {
+    return dynamicSource.getCategories();
+  }
+}
+```
+
+## 📋 实施步骤
+
+### 阶段 1: 后端开发 (1-2周)
+
+1. **环境搭建**
+   ```bash
+   # 创建后端项目
+   mkdir fumadocs-backend
+   cd fumadocs-backend
+   python -m venv venv
+   source venv/bin/activate
+   pip install fastapi uvicorn sqlalchemy pymysql python-multipart
+   ```
+
+2. **数据库设计**
+   - 创建 MySQL 数据库
+   - 执行建表 SQL
+   - 插入初始数据
+
+3. **API 开发**
+   - 实现文章 CRUD 接口
+   - 实现分类管理接口
+   - 添加数据验证和错误处理
+
+4. **测试验证**
+   - API 接口测试
+   - 数据库操作测试
+   - 性能测试
+
+### 阶段 2: 前端集成 (1-2周)
+
+1. **管理后台开发**
+   - 文章编辑器页面
+   - 分类管理页面
+   - 文章列表页面
+
+2. **动态路由实现**
+   - 修改现有路由结构
+   - 实现动态数据获取
+   - 集成 CustomDocsPage 组件
+
+3. **数据源切换**
+   - 修改 source.ts
+   - 实现混合数据源
+   - 保持向后兼容
+
+### 阶段 3: 部署优化 (1周)
+
+1. **部署配置**
+   - Docker 容器化
+   - 环境变量配置
+   - 数据库连接池优化
+
+2. **性能优化**
+   - API 响应缓存
+   - 数据库查询优化
+   - 前端页面缓存
+
+3. **监控告警**
+   - 日志记录
+   - 错误监控
+   - 性能监控
+
+## 🚀 部署方案
+
+### Docker Compose 配置
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  frontend:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - API_BASE_URL=http://backend:8000
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DB_HOST=mysql
+      - DB_USER=fumadocs
+      - DB_PASSWORD=password
+      - DB_NAME=fumadocs
+    depends_on:
+      - mysql
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootpassword
+      - MYSQL_DATABASE=fumadocs
+      - MYSQL_USER=fumadocs
+      - MYSQL_PASSWORD=password
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "3306:3306"
+
+volumes:
+  mysql_data:
+```
+
+## 📈 扩展功能
+
+### 未来可能的增强功能
+
+1. **用户系统**
+   - 用户注册/登录
+   - 权限管理
+   - 多作者协作
+
+2. **内容增强**
+   - 文章标签系统
+   - 全文搜索
+   - 文章评论
+
+3. **SEO 优化**
+   - 自动生成 sitemap
+   - 结构化数据
+   - 社交媒体卡片
+
+4. **分析统计**
+   - 访问统计
+   - 热门文章
+   - 用户行为分析
+
+## 🔐 安全考虑
+
+1. **API 安全**
+   - JWT 认证
+   - 请求频率限制
+   - 输入验证和清理
+
+2. **数据库安全**
+   - 连接加密
+   - 备份策略
+   - 访问控制
+
+3. **前端安全**
+   - XSS 防护
+   - CSRF 防护
+   - 内容安全策略
+
+---
+
+*本方案文档最后更新: 2025年9月20日*
