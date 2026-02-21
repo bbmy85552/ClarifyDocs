@@ -46,6 +46,26 @@ export async function POST(request: NextRequest) {
 
     // 连接数据库，查询或创建用户
     const { Pool } = require('pg');
+
+    // 调试：检查 DATABASE_URL（只记录主机和端口，不记录密码）
+    const dbUrl = process.env.DATABASE_URL;
+    if (dbUrl) {
+      try {
+        const url = new URL(dbUrl);
+        console.log('数据库连接信息:', {
+          protocol: url.protocol,
+          hostname: url.hostname,
+          port: url.port,
+          database: url.pathname,
+          hasPassword: !!url.password
+        });
+      } catch (e) {
+        console.log('DATABASE_URL 解析失败:', dbUrl);
+      }
+    } else {
+      console.log('DATABASE_URL 未设置');
+    }
+
     const pool = new Pool({
       connectionString: process.env.DATABASE_URL,
     });
