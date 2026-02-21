@@ -37,6 +37,13 @@ export async function POST(request: NextRequest) {
       picture: avatar,
     } = payload;
 
+    if (!email) {
+      return NextResponse.json(
+        { error: 'Google 账号未返回邮箱' },
+        { status: 400 }
+      );
+    }
+
     // 连接数据库，查询或创建用户
     const { Pool } = require('pg');
     const pool = new Pool({
