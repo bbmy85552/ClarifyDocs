@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { MdxEditor } from '@/components/editor/mdx-editor-with-highlight';
-import { MetadataForm } from '@/components/editor/metadata-form';
+import { MetadataForm, DocumentMetadata } from '@/components/editor/metadata-form';
 import { Save, Eye, Loader2, Trash2 } from 'lucide-react';
 
 export default function EditDocumentPage() {
@@ -18,13 +18,13 @@ export default function EditDocumentPage() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const [metadata, setMetadata] = useState({
+  const [metadata, setMetadata] = useState<DocumentMetadata>({
     title: '',
     description: '',
     slug: '',
     category: 'general',
     tags: [],
-    status: 'draft' as const,
+    status: 'draft',
   });
 
   const [content, setContent] = useState('');

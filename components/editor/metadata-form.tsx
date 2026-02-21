@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 
-interface DocumentMetadata {
+export interface DocumentMetadata {
   title: string;
   description?: string;
   slug?: string;

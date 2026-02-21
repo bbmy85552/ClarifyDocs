@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { MdxEditor } from '@/components/editor/mdx-editor-with-highlight';
-import { MetadataForm } from '@/components/editor/metadata-form';
+import { MetadataForm, DocumentMetadata } from '@/components/editor/metadata-form';
 import { Save, Eye, Loader2, AlertCircle } from 'lucide-react';
 import { validateMdxContent } from '@/lib/content-validation';
 
@@ -15,13 +15,13 @@ export default function NewDocumentPage() {
   const [showTips, setShowTips] = useState(true);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const [metadata, setMetadata] = useState({
+  const [metadata, setMetadata] = useState<DocumentMetadata>({
     title: '',
     description: '',
     slug: '',
     category: 'general',
     tags: [],
-    status: 'draft' as const,
+    status: 'draft',
   });
 
   const [content, setContent] = useState('');

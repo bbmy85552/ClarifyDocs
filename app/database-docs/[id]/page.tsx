@@ -267,30 +267,30 @@ export default function DatabaseDocDetailPage() {
               remarkPlugins={[remarkGfm]}
               rehypePlugins={[rehypeRaw, rehypeSanitize]}
               components={{
-                h1: ({ children }: { children: React.ReactNode }) => {
+                h1: ({ children }: { children?: React.ReactNode }) => {
                   const text = extractText(children);
                   const id = headingIdMap[text] || `heading-${Math.random().toString(36).substr(2, 9)}`;
                   return <h1 id={id} className="text-3xl font-bold mb-4 scroll-mt-20">{children}</h1>;
                 },
-                h2: ({ children }: { children: React.ReactNode }) => {
+                h2: ({ children }: { children?: React.ReactNode }) => {
                   const text = extractText(children);
                   const id = headingIdMap[text] || `heading-${Math.random().toString(36).substr(2, 9)}`;
                   return <h2 id={id} className="text-2xl font-semibold mb-3 mt-6 scroll-mt-20">{children}</h2>;
                 },
-                h3: ({ children }: { children: React.ReactNode }) => {
+                h3: ({ children }: { children?: React.ReactNode }) => {
                   const text = extractText(children);
                   const id = headingIdMap[text] || `heading-${Math.random().toString(36).substr(2, 9)}`;
                   return <h3 id={id} className="text-xl font-semibold mb-2 mt-4 scroll-mt-20">{children}</h3>;
                 },
-                h4: ({ children }: { children: React.ReactNode }) => {
+                h4: ({ children }: { children?: React.ReactNode }) => {
                   const text = extractText(children);
                   const id = headingIdMap[text] || `heading-${Math.random().toString(36).substr(2, 9)}`;
                   return <h4 id={id} className="text-lg font-semibold mb-2 mt-4 scroll-mt-20">{children}</h4>;
                 },
-                p: ({ children }: { children: React.ReactNode }) => (
+                p: ({ children }: { children?: React.ReactNode }) => (
                   <p className="mb-4 leading-7">{children}</p>
                 ),
-                code: ({ children, className }: { children: React.ReactNode; className?: string }) => {
+                code: ({ children, className }: { children?: React.ReactNode; className?: string }) => {
                   if (className?.includes('language-')) {
                     return <code className={className}>{children}</code>;
                   }
@@ -300,31 +300,31 @@ export default function DatabaseDocDetailPage() {
                     </code>
                   );
                 },
-                pre: ({ children }: { children: React.ReactNode }) => (
+                pre: ({ children }: { children?: React.ReactNode }) => (
                   <pre className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-4 overflow-x-auto mb-4">
                     {children}
                   </pre>
                 ),
-                ul: ({ children }: { children: React.ReactNode }) => (
+                ul: ({ children }: { children?: React.ReactNode }) => (
                   <ul className="list-disc list-inside mb-4 space-y-2">{children}</ul>
                 ),
-                ol: ({ children }: { children: React.ReactNode }) => (
+                ol: ({ children }: { children?: React.ReactNode }) => (
                   <ol className="list-decimal list-inside mb-4 space-y-2">{children}</ol>
                 ),
-                li: ({ children }: { children: React.ReactNode }) => (
+                li: ({ children }: { children?: React.ReactNode }) => (
                   <li className="ml-6">{children}</li>
                 ),
-                a: ({ href, children }: { href: string; children: React.ReactNode }) => (
+                a: ({ href, children }: { href?: string; children?: React.ReactNode }) => (
                   <a href={href} className="text-blue-600 hover:text-blue-700 underline">
                     {children}
                   </a>
                 ),
-                blockquote: ({ children }: { children: React.ReactNode }) => (
+                blockquote: ({ children }: { children?: React.ReactNode }) => (
                   <blockquote className="border-l-4 border-gray-300 dark:border-gray-700 pl-4 italic text-gray-700 dark:text-gray-300 my-4">
                     {children}
                   </blockquote>
                 ),
-                strong: ({ children }: { children: React.ReactNode }) => (
+                strong: ({ children }: { children?: React.ReactNode }) => (
                   <strong className="font-semibold">{children}</strong>
                 ),
                 hr: () => <hr className="my-8 border-gray-200 dark:border-gray-700" />,
